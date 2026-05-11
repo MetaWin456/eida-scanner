@@ -759,54 +759,59 @@ function detectDeviceInfo() {
   const ua = navigator.userAgent;
   let model = 'Unknown', os = '—', lidar = '—', lidarCls = 'warn';
 
+  // ── iOS / iPhone ──
   if (/iPhone/.test(ua)) {
     const m = ua.match(/iPhone OS (\d+_\d+)/);
     os = 'iOS ' + (m ? m[1].replace('_','.') : '—');
-    model = 'Apple iPhone (' + os + ')';
+    model = 'Apple iPhone';
     const dpr = window.devicePixelRatio || 1;
     const sw  = screen.width * dpr;
     const hasL = sw >= 2532;
-    lidar = hasL ? '✅ Detected (iPhone 12 Pro+)' : '⚠ Not detected';
+    lidar = hasL ? '✅ Detected (12 Pro+)' : '⚠ Not detected';
     lidarCls = hasL ? 'ok' : 'warn';
 
+  // ── Android ──
   } else if (/Android/.test(ua)) {
-    // Android version
     const av = ua.match(/Android ([\d.]+)/);
     const androidVer = av ? av[1] : '—';
     os = 'Android ' + androidVer;
 
-    // Device brand/model — multiple patterns
-    let brand = '', modelName = '';
+    // Step 1: try navigator.userAgentData (Chrome 90+ on Android)
+    let modelName = '';
+    if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+      navigator.userAgentData.getHighEntropyValues(['model','platform','platformVersion'])
+        .then(data => {
+          if (data.model) {
+            const brand = guessBrand(ua, data.model);
+            setText('vModel', brand + data.model);
+            setC('cardModel','ok');
+          }
+        }).catch(()=>{});
+    }
 
-    // Pattern 1: Build/xxx; wv — WebView
-    const p1 = ua.match(/;\s*([^;)]+)\s+Build\//);
-    if (p1) modelName = p1[1].trim();
+    // Step 2: UA string parsing — extract model between Android x.x; and Build/
+    const rBuild = ua.match(/Android [\d.]+;\s*([\w\s.-]+?)\s+Build\//i);
+    if (rBuild) modelName = rBuild[1].trim();
 
-    // Pattern 2: after "Android x.x; "
+    // Step 3: fallback — after "Android x.x; "
     if (!modelName) {
-      const p2 = ua.match(/Android [\d.]+;\s*([^)]+)\)/);
-      if (p2) modelName = p2[1].trim();
+      const rFallback = ua.match(/Android [\d.]+;\s*([^;)]+)/);
+      if (rFallback) modelName = rFallback[1].replace(/Build.*$/,'').trim();
     }
 
-    // Clean up model name
-    if (modelName) {
-      // Remove "wv" WebView suffix
-      modelName = modelName.replace(/\s*wv$/, '').trim();
-      // Remove "K" suffix (some Vivo models)
-      // Detect known brands
-      const brands = ['vivo','samsung','xiaomi','redmi','oppo','realme',
-                      'huawei','honor','oneplus','motorola','nokia','asus'];
-      const lower = modelName.toLowerCase();
-      const found = brands.find(b => lower.includes(b));
-      if (found) brand = found.charAt(0).toUpperCase() + found.slice(1) + ' ';
-      model = (brand || '') + modelName;
-    } else {
-      model = 'Android Device';
-    }
+    // Clean up
+    modelName = modelName
+      .replace(/\s*Build\/.*$/i,'')
+      .replace(/;.*$/,'')
+      .replace(/\bwv\b/gi,'')
+      .trim();
 
-    lidar = '— Android: ขึ้นกับรุ่น';
+    const brandName = guessBrand(ua, modelName);
+    model = (brandName ? brandName + ' ' : '') + (modelName || 'Android Device');
+    lidar = '— ขึ้นกับรุ่น';
     lidarCls = 'warn';
 
+  // ── Desktop / Other ──
   } else {
     model = navigator.platform || 'Desktop/Other';
     os = navigator.platform || '—';
@@ -815,25 +820,54 @@ function detectDeviceInfo() {
 
   // RAM
   const ram = navigator.deviceMemory;
-  if (ram) {
-    setText('vRAM', ram + ' GB (approx)');
-    setC('cardRAM', ram >= 4 ? 'ok' : 'warn');
-  } else {
-    setText('vRAM', 'ไม่รองรับ API');
-    setC('cardRAM', 'warn');
-  }
+  setText('vRAM', ram ? ram + ' GB (approx)' : 'API ไม่รองรับ');
+  setC('cardRAM', ram >= 4 ? 'ok' : 'warn');
 
-  // Screen / DPR info
-  const dpr   = window.devicePixelRatio || 1;
-  const sw    = Math.round(screen.width  * dpr);
-  const sh    = Math.round(screen.height * dpr);
+  // Screen
+  const dpr = window.devicePixelRatio || 1;
+  const sw  = Math.round(screen.width * dpr);
+  const sh  = Math.round(screen.height * dpr);
 
-  setText('vModel', model);
-  setText('vOS',    os + ' | ' + sw + '×' + sh + ' px');
+  setText('vModel', model || 'Detecting...');
+  setText('vOS',    os + ' | DPR ' + dpr.toFixed(1) + ' | ' + sw + '×' + sh);
   setText('vLidar', lidar);
   setC('cardLidar', lidarCls);
   setC('cardModel', 'ok');
   setC('cardOS',    'ok');
+}
+
+// ── Brand Guesser from UA + model string ──
+function guessBrand(ua, modelStr) {
+  const uaL = ua.toLowerCase();
+  const mL  = (modelStr||'').toLowerCase();
+
+  // Explicit brand in UA string
+  if (/vivo/i.test(ua))     return 'vivo';
+  if (/samsung/i.test(ua))  return 'Samsung';
+  if (/huawei/i.test(ua))   return 'Huawei';
+  if (/oppo/i.test(ua))     return 'OPPO';
+  if (/realme/i.test(ua))   return 'Realme';
+  if (/xiaomi/i.test(ua))   return 'Xiaomi';
+  if (/redmi/i.test(ua))    return 'Redmi';
+  if (/oneplus/i.test(ua))  return 'OnePlus';
+  if (/motorola/i.test(ua)) return 'Motorola';
+  if (/nokia/i.test(ua))    return 'Nokia';
+
+  // Model prefix patterns (when brand not in UA)
+  if (/^sm-|^gt-/i.test(mL))  return 'Samsung';  // SM-G991B, GT-I9300
+  if (/^cph/i.test(mL))        return 'OPPO';     // CPH2269
+  if (/^rmx|^rmp/i.test(mL))  return 'Realme';   // RMX3521
+  if (/^m[0-9]{4}/i.test(mL)) return 'Motorola'; // Moto G
+  if (/^pixel/i.test(mL))     return 'Google';
+  if (/^v[0-9]{4}/i.test(mL)) return 'vivo';     // V2209, V2246
+  if (/^itel/i.test(mL))      return 'itel';
+  if (/^tecno/i.test(mL))     return 'TECNO';
+  if (/^inf-|^x6/i.test(mL)) return 'Infinix';
+
+  // Numeric-only Xiaomi internal codes (e.g. 2203121C, 21091116I)
+  if (/^2[0-9]{7,9}[a-z]?$/i.test(mL)) return 'Xiaomi';
+
+  return '';  // Unknown brand
 }
 
 async function askCam(){
