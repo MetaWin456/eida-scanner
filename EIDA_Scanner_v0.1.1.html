@@ -291,6 +291,35 @@ select:focus,input:focus{outline:none;border-color:var(--g3)}
     font-size:10px; color:#4a7c4a; margin-top:6px; text-align:center;
     font-family:'IBM Plex Mono',monospace;
   }
+
+  /* ── CAMERA DENIED GUIDE ── */
+  .cam-denied {
+    display:none; background:#FFF3E0; border:1.5px solid #e65100;
+    border-radius:8px; padding:14px; margin-top:8px;
+  }
+  .cam-denied-title {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:700;
+    color:#e65100; letter-spacing:1px; margin-bottom:10px;
+  }
+  .cam-step {
+    display:flex; gap:10px; align-items:flex-start;
+    margin-bottom:8px; padding-bottom:8px;
+    border-bottom:1px solid rgba(230,81,0,.15);
+  }
+  .cam-step:last-child { border:none; margin:0; padding:0; }
+  .cam-step-no {
+    background:#e65100; color:#fff; font-family:'IBM Plex Mono',monospace;
+    font-size:11px; font-weight:700; width:22px; height:22px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .cam-step-text { font-size:12px; color:#1a2e1a; line-height:1.5; }
+  .cam-step-text b { color:#e65100; }
+  .btn-retry-cam {
+    width:100%; margin-top:10px; padding:11px;
+    background:#e65100; color:#fff; border:none; border-radius:7px;
+    font-size:14px; font-weight:600; font-family:'IBM Plex Sans Thai',sans-serif;
+    cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -485,6 +514,29 @@ select:focus,input:focus{outline:none;border-color:var(--g3)}
       <div class="cam-hint" id="camHint">แตะ "อนุญาต" ด้านบนเพื่อเปิดกล้อง</div>
     </div>
   </div>
+
+  <!-- Camera Denied Guide -->
+  <div class="cam-denied" id="camDenied">
+    <div class="cam-denied-title">📷 วิธีเปิดสิทธิ์กล้องใหม่ (Android Chrome)</div>
+    <div class="cam-step">
+      <div class="cam-step-no">1</div>
+      <div class="cam-step-text">แตะไอคอน <b>🔒 หรือ ⓘ</b> ที่ Address Bar ด้านบน</div>
+    </div>
+    <div class="cam-step">
+      <div class="cam-step-no">2</div>
+      <div class="cam-step-text">เลือก <b>"การอนุญาต"</b> หรือ <b>"Permissions"</b></div>
+    </div>
+    <div class="cam-step">
+      <div class="cam-step-no">3</div>
+      <div class="cam-step-text">หา <b>"กล้อง / Camera"</b> → เปลี่ยนจาก <b style="color:#c62828">บล็อก</b> เป็น <b style="color:#2e7d32">อนุญาต</b></div>
+    </div>
+    <div class="cam-step">
+      <div class="cam-step-no">4</div>
+      <div class="cam-step-text">กลับมาที่หน้านี้แล้วกด <b>"รีโหลด"</b> หรือปุ่มด้านล่าง</div>
+    </div>
+    <button class="btn-retry-cam" onclick="location.reload()">🔄 รีโหลดและลองใหม่</button>
+  </div>
+
   <div class="form-row" style="margin-top:10px">
     <div class="fg">
       <label>DBH Ground Truth (cm)</label>
@@ -701,6 +753,89 @@ function askGPS(){
 }
 
 // Camera
+
+// ── DEVICE DETECTION (independent — runs on load) ──
+function detectDeviceInfo() {
+  const ua = navigator.userAgent;
+  let model = 'Unknown', os = '—', lidar = '—', lidarCls = 'warn';
+
+  if (/iPhone/.test(ua)) {
+    const m = ua.match(/iPhone OS (\d+_\d+)/);
+    os = 'iOS ' + (m ? m[1].replace('_','.') : '—');
+    model = 'Apple iPhone (' + os + ')';
+    const dpr = window.devicePixelRatio || 1;
+    const sw  = screen.width * dpr;
+    const hasL = sw >= 2532;
+    lidar = hasL ? '✅ Detected (iPhone 12 Pro+)' : '⚠ Not detected';
+    lidarCls = hasL ? 'ok' : 'warn';
+
+  } else if (/Android/.test(ua)) {
+    // Android version
+    const av = ua.match(/Android ([\d.]+)/);
+    const androidVer = av ? av[1] : '—';
+    os = 'Android ' + androidVer;
+
+    // Device brand/model — multiple patterns
+    let brand = '', modelName = '';
+
+    // Pattern 1: Build/xxx; wv — WebView
+    const p1 = ua.match(/;\s*([^;)]+)\s+Build\//);
+    if (p1) modelName = p1[1].trim();
+
+    // Pattern 2: after "Android x.x; "
+    if (!modelName) {
+      const p2 = ua.match(/Android [\d.]+;\s*([^)]+)\)/);
+      if (p2) modelName = p2[1].trim();
+    }
+
+    // Clean up model name
+    if (modelName) {
+      // Remove "wv" WebView suffix
+      modelName = modelName.replace(/\s*wv$/, '').trim();
+      // Remove "K" suffix (some Vivo models)
+      // Detect known brands
+      const brands = ['vivo','samsung','xiaomi','redmi','oppo','realme',
+                      'huawei','honor','oneplus','motorola','nokia','asus'];
+      const lower = modelName.toLowerCase();
+      const found = brands.find(b => lower.includes(b));
+      if (found) brand = found.charAt(0).toUpperCase() + found.slice(1) + ' ';
+      model = (brand || '') + modelName;
+    } else {
+      model = 'Android Device';
+    }
+
+    lidar = '— Android: ขึ้นกับรุ่น';
+    lidarCls = 'warn';
+
+  } else {
+    model = navigator.platform || 'Desktop/Other';
+    os = navigator.platform || '—';
+    lidar = '—';
+  }
+
+  // RAM
+  const ram = navigator.deviceMemory;
+  if (ram) {
+    setText('vRAM', ram + ' GB (approx)');
+    setC('cardRAM', ram >= 4 ? 'ok' : 'warn');
+  } else {
+    setText('vRAM', 'ไม่รองรับ API');
+    setC('cardRAM', 'warn');
+  }
+
+  // Screen / DPR info
+  const dpr   = window.devicePixelRatio || 1;
+  const sw    = Math.round(screen.width  * dpr);
+  const sh    = Math.round(screen.height * dpr);
+
+  setText('vModel', model);
+  setText('vOS',    os + ' | ' + sw + '×' + sh + ' px');
+  setText('vLidar', lidar);
+  setC('cardLidar', lidarCls);
+  setC('cardModel', 'ok');
+  setC('cardOS',    'ok');
+}
+
 async function askCam(){
   setS('sCam','⟳ รอ...','wait');
   try{
